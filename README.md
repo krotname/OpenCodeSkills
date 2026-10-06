@@ -6,31 +6,31 @@
 [![Node.js](https://img.shields.io/badge/Node.js-22%2B-16a34a?style=flat-square&logo=nodedotjs&logoColor=white)](https://nodejs.org/)
 [![Git worktrees](https://img.shields.io/badge/Git-isolated_worktrees-f59e0b?style=flat-square&logo=git&logoColor=white)](https://git-scm.com/docs/git-worktree)
 
-Run independent OpenCode tasks in separate Git worktrees and collect verifiable results before combining their changes. The toolkit includes three native skills and a stdio MCP server that limits concurrency and returns each task's status, exit code, stdout and stderr.
+Запускайте независимые задачи OpenCode в отдельных Git worktree и проверяйте результаты перед объединением изменений. В набор входят три штатных навыка и stdio MCP-сервер: он ограничивает параллельную работу и возвращает статус, код завершения, stdout и stderr каждой задачи.
 
-**Start here:** [Quick start](#quick-start) · [Skills](#skills) · [MCP setup](mcp/opencode-subagents/README.md) · [Parallel example](examples/parallel-demo.mjs) · [Русский](README.ru.md)
+**Быстрый переход:** [Установка](#быстрый-старт) · [Навыки](#навыки) · [Настройка MCP](mcp/opencode-subagents/README.md) · [Пример двух задач](examples/parallel-demo.mjs) · [English](README.en.md)
 
-## Why use it
+## Зачем это нужно
 
-- **Separate changes:** every Git task gets its own branch and worktree.
-- **Bound parallel work:** up to four active runs, with timeouts and cancellation.
-- **Check the result:** inspect exit codes, actual output files and diffs before integration.
-- **Keep commands intact:** preserve PowerShell arguments and Unicode across SSH and WinRM.
+- **Разделить изменения:** каждая Git-задача получает свою ветку и worktree.
+- **Ограничить параллельную работу:** до четырёх активных запусков, тайм-ауты и отмена.
+- **Проверить результат:** код завершения, настоящий файл и diff перед объединением.
+- **Сохранить команды:** аргументы PowerShell и Unicode при работе через SSH и WinRM.
 
-## Skills
+## Навыки
 
-| Component | Practical use |
+| Компонент | Польза |
 | --- | --- |
-| [Parallel agents](opencode-parallel-agents/SKILL.md) | Split independent tasks, collect results and integrate inspected changes |
-| [PowerShell invocation](powershell-invocation/SKILL.md) | Preserve arguments and Unicode across PowerShell, SSH and WinRM |
-| [GitHub CI debugging](gh-fix-ci/SKILL.md) | Read failed GitHub Actions checks and find the relevant failure |
-| [OpenCode MCP server](mcp/opencode-subagents/README.md) | `spawn`, `wait`, `result`, `cancel`; isolated Git branches |
+| [Параллельные агенты](opencode-parallel-agents/SKILL.md) | Разделение задач, сбор результатов и объединение проверенных изменений |
+| [Вызовы PowerShell](powershell-invocation/SKILL.md) | Аргументы и Unicode при работе через PowerShell, SSH и WinRM |
+| [Разбор GitHub CI](gh-fix-ci/SKILL.md) | Поиск причины упавшей проверки GitHub Actions |
+| [MCP-сервер OpenCode](mcp/opencode-subagents/README.md) | `spawn`, `wait`, `result`, `cancel`; отдельные Git-ветки |
 
-## Quick start
+## Быстрый старт
 
-Requirements: **Node.js 22+**, **Git**, the **OpenCode CLI** and an authenticated provider that supports the server's configured model. The CI debugging skill also needs **Python 3.10+** and authenticated **GitHub CLI (`gh`)**.
+Нужны **Node.js 22+**, **Git**, **OpenCode CLI** и авторизованный провайдер, который поддерживает модель сервера. Для разбора CI также нужны **Python 3.10+** и авторизованный **GitHub CLI (`gh`)**.
 
-Run these commands from the project that will receive the skills:
+Выполните команды из проекта, в который устанавливаете навыки:
 
 ```sh
 git clone https://github.com/krotname/OpenCodeSkills.git
@@ -51,56 +51,56 @@ node OpenCodeSkills/scripts/verify.mjs
 
 </details>
 
-The checks use a deterministic CLI stand-in and make no model calls. Copy the complete skill folders, including the `gh-fix-ci` helper and its license. For a global installation, use `~/.config/opencode/skills` as the destination.
+Проверка использует управляемый тестовый CLI и не обращается к модели. Копируйте папки навыков целиком, включая helper и лицензию `gh-fix-ci`. Для глобальной установки используйте каталог `~/.config/opencode/skills`.
 
-The parallel agents skill also needs the [MCP server configured](mcp/opencode-subagents/README.md#configure). The other skills can be used independently. The same stdio server works with compatible MCP clients.
+Навыку параллельной работы также нужна [настройка MCP-сервера](mcp/opencode-subagents/README.md#configure). Остальные навыки работают независимо. Этот же stdio-сервер можно подключить к совместимым MCP-клиентам.
 
-## How parallel tasks work
+## Как работают параллельные задачи
 
 ```mermaid
 flowchart LR
-    C[Coordinator] --> M[OpenCode MCP server]
-    M --> A[Task A: branch + worktree A]
-    M --> B[Task B: branch + worktree B]
-    A --> RA[Exit code + artifact + diff A]
-    B --> RB[Exit code + artifact + diff B]
-    RA --> V[Inspect and integrate]
+    C[Координатор] --> M[MCP-сервер OpenCode]
+    M --> A[Задача A: ветка и worktree A]
+    M --> B[Задача B: ветка и worktree B]
+    A --> RA[Код завершения + файл + diff A]
+    B --> RB[Код завершения + файл + diff B]
+    RA --> V[Проверка и объединение]
     RB --> V
 ```
 
-Start both tasks with `spawn` before waiting for either one. Use `wait` to follow a run, `result` to inspect its status and output, and `cancel` to stop that exact run. [Tool inputs and results](mcp/opencode-subagents/README.md#configure).
+Сначала вызовите `spawn` для обеих задач, затем ждите результаты. `wait` отслеживает запуск, `result` возвращает статус и вывод, `cancel` останавливает точный запуск. [Параметры и результаты инструментов](mcp/opencode-subagents/README.md#configure).
 
-## Try the parallel example
+## Попробовать пример двух задач
 
 ```sh
 cd OpenCodeSkills
 node examples/parallel-demo.mjs
 ```
 
-The demo makes **two real model calls** in distinct worktrees, prints the run IDs and directories, and verifies these artifacts:
+Демо делает **два настоящих обращения к модели** в разных worktree, выводит идентификаторы запусков и каталоги, затем проверяет файлы:
 
-| Artifact | Verified content |
+| Файл | Проверяемое содержимое |
 | --- | --- |
 | `parallel-demo.txt` | `PARALLEL_TEXT_OK` |
 | `parallel-demo.json` | `{"ok":true,"task":"parallel-json"}` |
 
-Read the [MCP setup](mcp/opencode-subagents/README.md) before the demo. The model and variant are fixed in the server; requests cannot change them. A provider error or quota failure is reported as a failed run.
+Перед запуском прочитайте [настройку MCP](mcp/opencode-subagents/README.md). Модель и вариант закреплены в сервере и не меняются параметрами запроса. Ошибка провайдера или лимита отмечается как неуспешный запуск.
 
-## Integration boundaries
+## Объединение изменений
 
-- Worktrees start from **committed HEAD**; uncommitted changes are not copied.
-- Child commits are **not merged automatically**. Inspect the diff and artifacts first.
-- Non-Git directories have a **single-writer lock**.
-- Keep each returned worktree while its artifacts are needed.
+- Worktree создаётся от **закоммиченного HEAD**; незакоммиченные изменения не копируются.
+- Ветки **не сливаются автоматически**. Сначала проверьте diff и файлы с результатом.
+- В негитовом каталоге действует **блокировка на одного писателя**.
+- Сохраняйте выданный worktree, пока нужны созданные в нём файлы.
 
-## Updates and contributions
+## Обновления и участие
 
-Found a reproducible problem? [Open an issue](https://github.com/krotname/OpenCodeSkills/issues) with the command, expected result and actual result. Small, focused pull requests are welcome.
+Нашли воспроизводимую ошибку? [Откройте issue](https://github.com/krotname/OpenCodeSkills/issues) с командой, ожидаемым и фактическим результатом. Небольшие pull request с отдельным исправлением тоже приветствуются.
 
-This repository is a curated export maintained from a private source. Only explicitly selected files enter the public history; export checks run before publication. Changes to exported files are reconciled with the source before the next export, so an export stops rather than overwriting an independent edit.
+Это выбранное публичное ядро приватного источника. Экспорт допускает только перечисленные файлы и проверяет их до публикации; приватная история не переносится. Независимая правка публичного файла останавливает следующий экспорт до согласования с источником.
 
-## License and maintainer
+## Лицензия и автор
 
-[Apache-2.0](LICENSE). Bundled upstream licenses and attribution are retained in [NOTICE](NOTICE) and [gh-fix-ci/LICENSE.txt](gh-fix-ci/LICENSE.txt).
+[Apache-2.0](LICENSE). Исходные лицензии и атрибуция сторонних компонентов сохранены в [NOTICE](NOTICE) и [gh-fix-ci/LICENSE.txt](gh-fix-ci/LICENSE.txt).
 
-Maintained by [Andrei Ovcharenko (@krotname)](https://github.com/krotname).
+Автор: [Андрей Овчаренко (@krotname)](https://github.com/krotname).
