@@ -4,14 +4,17 @@ import { mkdtemp, writeFile, readFile, rm, rmdir } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import readline from "node:readline";
+import { catalogFor } from "./test-model-policy.mjs";
 
 const directory = await mkdtemp(path.join(os.tmpdir(), "opencode-failure-test-"));
 const log = path.join(directory, "provider.log");
 await writeFile(log, "");
+await writeFile(path.join(directory, "models"), `console.log(${JSON.stringify(catalogFor(["opencode/muse-spark-1.3-contributor-free"]))});`);
+await writeFile(path.join(directory, "debug"), 'console.log(JSON.stringify({permission:"deny"}));');
 await writeFile(path.join(directory, "run"), `
 const fs = require('node:fs');
-require('node:assert/strict').equal(process.argv[process.argv.indexOf('--model') + 1], 'openai/gpt-6.1-sol');
-require('node:assert/strict').equal(process.argv[process.argv.indexOf('--variant') + 1], 'xhigh');
+require('node:assert/strict').equal(process.argv[process.argv.indexOf('--model') + 1], 'opencode/muse-spark-1.3-contributor-free');
+require('node:assert/strict').equal(process.argv.includes('--variant'), false);
 const title = process.argv[process.argv.indexOf('--title') + 1];
 fs.appendFileSync(process.env.OPENCODE_SUBAGENTS_LOG_FILE,
   'level=ERROR run=foreign message="Go usage limit exceeded"\\n' +
@@ -21,7 +24,7 @@ setTimeout(() => fs.appendFileSync(process.env.OPENCODE_SUBAGENTS_LOG_FILE,
 setInterval(() => {}, 1000);
 `);
 const child = spawn(process.execPath, [new URL("./server.mjs", import.meta.url).pathname.replace(/^\/(\w:)/, "$1")], {
-  env: { ...process.env, OPENCODE_SUBAGENTS_OPENCODE: process.execPath, OPENCODE_SUBAGENTS_LOG_FILE: log },
+  env: { ...process.env, OPENCODE_SUBAGENTS_POLICY_FILE: path.join(directory, "absent-policy.json"), OPENCODE_SUBAGENTS_OPENCODE: process.execPath, OPENCODE_SUBAGENTS_LOG_FILE: log },
   stdio: ["pipe", "pipe", "inherit"], windowsHide: true,
 });
 let nextId = 1;
@@ -47,7 +50,8 @@ try {
   const result = await call("tools/call", { name: "wait", arguments: { id: run.id, wait_seconds: 10 } });
   const state = JSON.parse(result.content[0].text);
   assert.equal(state.status, "failed", JSON.stringify(state));
-  assert.equal(state.detail, "Go usage limit exceeded");
+  assert.equal(state.detail, "Разрешённые модели исчерпаны: Go usage limit exceeded");
+  assert.equal(state.attempts.length, 1);
   assert.ok(Date.parse(state.finishedAt) - Date.parse(state.startedAt) < 10000);
   assert.equal((await readFile(log, "utf8")).includes('run=own message="Go usage limit exceeded"'), true);
   console.log("provider quota failure detected, exact child stopped, detail retained");
@@ -57,6 +61,8 @@ try {
   await new Promise((resolve) => child.on("close", resolve));
   lines.close();
   await rm(path.join(directory, "run"));
+  await rm(path.join(directory, "models"));
+  await rm(path.join(directory, "debug"));
   await rm(log);
   await rmdir(directory);
 }
