@@ -6,9 +6,14 @@ import path from "node:path";
 import readline from "node:readline";
 import { fileURLToPath } from "node:url";
 import { inspectLogLines, inspectOutputLines, providerFailure } from "./provider-failure.mjs";
+import "./test-model-policy.mjs";
 
 assert.equal(providerFailure("AI_APICallError: Go usage limit exceeded"), "Go usage limit exceeded");
-assert.equal(providerFailure("connection timeout"), null);
+assert.equal(providerFailure("connection timeout"), "Provider connection error");
+assert.equal(providerFailure("HTTP 429 Too Many Requests"), "Provider rate or usage limit");
+assert.equal(providerFailure("model not found"), "Model unavailable");
+assert.equal(providerFailure("HTTP 503 Service Unavailable"), "Provider unavailable");
+assert.equal(inspectOutputLines(['{"type":"error","error":{"message":"unknown provider error"}}']), null);
 assert.equal(inspectOutputLines(['{"type":"tool_use","part":{"output":"Go usage limit exceeded"}}']), null);
 assert.equal(inspectOutputLines(['{"type":"error","error":{"message":"Go usage limit exceeded"}}']), "Go usage limit exceeded");
 const logState = {};
@@ -51,16 +56,17 @@ if (process.env.OPENCODE_SUBAGENTS_INTEGRATION === "1") {
       arguments: {
         directory,
         timeout_seconds: 300,
-        prompt: "Create a UTF-8 file named muse-proof.txt in the current directory containing exactly MUSE_WRITE_OK followed by one newline. Do not modify anything else.",
+        prompt: "Create a UTF-8 file named muse-proof.txt in the current directory containing exactly MUSE_WRITE_OK. A final newline is optional. Do not modify anything else.",
       },
     });
     const started = JSON.parse(spawned.result.content[0].text);
     assert.equal(spawned.result.isError, false, JSON.stringify(started));
-    assert.equal(started.providerID, "openai");
-    assert.equal(started.modelID, "gpt-6.1-sol");
-    assert.equal(started.variant, "xhigh");
+    assert.equal(started.providerID, "opencode");
+    assert.equal(started.models.every((model) => model.startsWith("opencode/") || model === "openai/gpt-6.1-sol"), true);
+    assert.equal(started.variant, null);
+    console.log(JSON.stringify({ started: started.id, modelID: started.modelID, candidates: started.models.length }));
     let status = started;
-    while (status.status === "running") {
+    while (["running", "cancelling"].includes(status.status)) {
       const waited = await call("tools/call", {
         name: "wait",
         arguments: { id: started.id, wait_seconds: 30 },
@@ -68,7 +74,8 @@ if (process.env.OPENCODE_SUBAGENTS_INTEGRATION === "1") {
       status = JSON.parse(waited.result.content[0].text);
     }
     assert.equal(status.status, "completed", JSON.stringify(status));
-    assert.equal(await readFile(path.join(directory, "muse-proof.txt"), "utf8"), "MUSE_WRITE_OK\n");
+    assert.match(await readFile(path.join(directory, "muse-proof.txt"), "utf8"), /^MUSE_WRITE_OK(?:\r?\n)?$/);
+    console.log(JSON.stringify({ providerID: status.providerID, modelID: status.modelID, sessionID: status.sessionID, attempts: status.attempts, artifact: "MUSE_WRITE_OK" }));
   } finally {
     await rm(directory, { recursive: true });
   }

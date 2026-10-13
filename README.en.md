@@ -84,7 +84,7 @@ The demo makes **two real model calls** in distinct worktrees, prints the run ID
 | `parallel-demo.txt` | `PARALLEL_TEXT_OK` |
 | `parallel-demo.json` | `{"ok":true,"task":"parallel-json"}` |
 
-Read the [MCP setup](mcp/opencode-subagents/README.md) before the demo. The model and variant are fixed in the server; requests cannot change them. A provider error or quota failure is reported as a failed run.
+Read the [MCP setup](mcp/opencode-subagents/README.md) before the demo. The server selects free models and switches after provider errors or limits. GPT‑6.1 Sol requires local authorization with an expiry; requests cannot change this policy. Exhausting the fallback chain is reported as a failed run.
 
 ## Integration boundaries
 
