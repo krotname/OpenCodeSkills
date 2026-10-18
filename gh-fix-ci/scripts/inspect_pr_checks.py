@@ -220,7 +220,7 @@ def fetch_checks(pr_value: str, repo_root: Path) -> list[dict[str, Any]] | None:
         ["pr", "checks", pr_value, "--json", ",".join(primary_fields)],
         cwd=repo_root,
     )
-    if result.returncode != 0:
+    if result.returncode != 0 and not (result.returncode in (1, 8) and result.stdout.lstrip().startswith("[")):
         message = "\n".join(filter(None, [result.stderr, result.stdout])).strip()
         available_fields = parse_available_fields(message)
         if available_fields:
@@ -241,7 +241,9 @@ def fetch_checks(pr_value: str, repo_root: Path) -> list[dict[str, Any]] | None:
                 ["pr", "checks", pr_value, "--json", ",".join(selected_fields)],
                 cwd=repo_root,
             )
-            if result.returncode != 0:
+            # gh pr checks uses 1 for failed checks and 8 for pending checks,
+            # while still returning the requested JSON list.
+            if result.returncode != 0 and not (result.returncode in (1, 8) and result.stdout.lstrip().startswith("[")):
                 message = (result.stderr or result.stdout or "").strip()
                 print(message or "Error: gh pr checks failed.", file=sys.stderr)
                 return None

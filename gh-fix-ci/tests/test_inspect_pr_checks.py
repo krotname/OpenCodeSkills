@@ -10,6 +10,7 @@ import importlib.util
 import sys
 import time
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "inspect_pr_checks.py"
@@ -64,6 +65,29 @@ class SnippetTests(unittest.TestCase):
         lines[50] = "Error: build broke"
         snippet = module.extract_failure_snippet("\n".join(lines), max_lines=160, context=30)
         self.assertEqual(snippet.splitlines(), lines[20:80])
+
+
+class CheckStatusTests(unittest.TestCase):
+    def test_pending_checks_exit_code_still_returns_checks(self) -> None:
+        checks = [{"name": "unit", "bucket": "pending", "state": "IN_PROGRESS"}]
+        with patch.object(module, "run_gh_command", return_value=module.GhResult(8, module.json.dumps(checks), "")):
+            self.assertEqual(module.fetch_checks("1", Path.cwd()), checks)
+
+    def test_command_error_is_not_treated_as_an_empty_check_list(self) -> None:
+        with patch.object(module, "run_gh_command", return_value=module.GhResult(1, "", "not authenticated")):
+            self.assertIsNone(module.fetch_checks("1", Path.cwd()))
+
+    def test_failing_checks_exit_code_still_returns_checks(self) -> None:
+        checks = [{"name": "unit", "state": "FAILURE", "detailsUrl": "https://example.invalid/job"}]
+        with patch.object(module, "run_gh_command", return_value=module.GhResult(1, module.json.dumps(checks), "")):
+            self.assertEqual(module.fetch_checks("1", Path.cwd()), checks)
+
+    def test_fallback_fields_accept_failing_checks_exit_code(self) -> None:
+        checks = [{"name": "unit", "bucket": "fail", "state": "FAILURE"}]
+        replies = [module.GhResult(1, "", "Unknown JSON field: conclusion\nAvailable fields:\n  name\n  bucket\n  state"),
+                   module.GhResult(1, module.json.dumps(checks), "")]
+        with patch.object(module, "run_gh_command", side_effect=replies):
+            self.assertEqual(module.fetch_checks("1", Path.cwd()), checks)
 
 
 if __name__ == "__main__":
