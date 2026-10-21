@@ -1,15 +1,14 @@
 ---
 name: "gh-fix-ci"
-description: "Use when a user asks to debug or fix failing GitHub PR checks that run in GitHub Actions; use `gh` to inspect checks and logs, summarize failure context, draft a fix plan, and implement only after explicit approval. Treat external providers (for example Buildkite) as out of scope and report only the details URL."
+description: "Use when a user asks to debug or fix failing GitHub PR checks that run in GitHub Actions; use `gh` to inspect checks and logs, identify the cause, and complete authorized fixes through tests, PR, required CI and merge. Respect requests limited to analysis or drafts. Treat external providers (for example Buildkite) as out of scope and report only the details URL."
 ---
 
 
-# Gh Pr Checks Plan Fix
+# Fix failing GitHub Actions checks
 
 ## Overview
 
-Use gh to locate failing PR checks, fetch GitHub Actions logs for actionable failures, summarize the failure snippet, then propose a fix plan and implement after explicit approval.
-- If a plan-oriented skill (for example `create-plan`) is available, use it; otherwise draft a concise plan inline and request approval before implementing.
+Use gh to locate failing PR checks, fetch GitHub Actions logs, identify the cause and complete the fix the user authorized. A request to fix CI already authorizes ordinary implementation and verification; do not request approval again for those steps. If the user requested analysis, planning or a draft only, stay within that scope. Ask only about a material unresolved choice or a required gate outside the authorization.
 
 Prereq: authenticate with the standard GitHub CLI once (for example, run `gh auth login`), then confirm with `gh auth status` (repo + workflow scopes are typically required).
 
@@ -50,12 +49,12 @@ Prereq: authenticate with the standard GitHub CLI once (for example, run `gh aut
 5. Summarize failures for the user.
    - Provide the failing check name, run URL (if any), and a concise log snippet.
    - Call out missing logs explicitly.
-6. Create a plan.
-   - Use the `create-plan` skill to draft a concise plan and request approval.
-7. Implement after approval.
-   - Apply the approved plan, summarize diffs/tests, and ask about opening a PR.
-8. Recheck status.
-   - After changes, suggest re-running the relevant tests and `gh pr checks` to confirm.
+6. Choose the smallest fix supported by the logs and current code.
+   - Preserve unrelated changes and describe the intended correction briefly.
+7. Implement and verify the authorized fix.
+   - Run relevant tests, commit on a separate branch, push and open or update the PR according to the repository workflow. Do not turn these routine steps into new approval gates.
+8. Complete the repository workflow.
+   - Verify required CI on the final head SHA and apply the configured review policy, then merge and verify the main branch unless the user explicitly limited the task to analysis or a draft. A real failing required check remains a blocker.
 
 ## Bundled Resources
 
