@@ -32,3 +32,13 @@ export function inspectOutputLines(lines) {
   }
   return null;
 }
+
+// These lines must come from the exact private child, never the shared log.
+export function inspectErrorLogLines(lines) {
+  for (const line of lines) {
+    if (!/\blevel=ERROR\b/i.test(line)) continue;
+    const failure = providerFailure(line);
+    if (failure) return failure;
+  }
+  return null;
+}

@@ -6,8 +6,10 @@ import os from "node:os";
 import path from "node:path";
 import readline from "node:readline";
 import { promisify } from "node:util";
-import { inspectLogLines, inspectOutputLines, providerFailure } from "./provider-failure.mjs";
+import { inspectErrorLogLines, inspectLogLines, inspectOutputLines, providerFailure } from "./provider-failure.mjs";
 import { executionModels, gptFallbackActive, GPT_FALLBACK, modelEnvironment } from "./model-policy.mjs";
+import { windowsExecutableCandidates } from "./command-resolution.mjs";
+import { readRuntimeApi } from "./runtime-api.mjs";
 
 const execFileAsync = promisify(execFile);
 const MAX_ACTIVE = 4;
@@ -17,7 +19,9 @@ const stateRoot = process.env.OPENCODE_SUBAGENTS_STATE_DIR || process.env.MUSE_S
 const opencodeCommand = process.env.OPENCODE_SUBAGENTS_OPENCODE || process.env.MUSE_SUBAGENTS_OPENCODE || (process.platform === "win32" ? "opencode.cmd" : "opencode");
 const runs = new Map();
 const directoryLocks = new Map();
-const logFile = process.env.OPENCODE_SUBAGENTS_LOG_FILE || path.join(os.homedir(), ".local", "share", "opencode", "log", "opencode.log");
+// v2 private servers have a different run ID from their CLI. Capture their own
+// error log on stderr; a shared title cannot safely identify server errors.
+const logFile = process.env.OPENCODE_SUBAGENTS_LOG_FILE;
 const idleTimeoutMs = Math.max(1000, Math.min(300_000, (Number(process.env.OPENCODE_SUBAGENTS_IDLE_SECONDS) || 120) * 1000));
 let catalogCache = null;
 const policyFile = process.env.OPENCODE_SUBAGENTS_POLICY_FILE || path.join(os.homedir(), ".local", "share", "krt", "opencode-subagents", "fallback-policy.json");
@@ -33,23 +37,24 @@ function commandSpec(command, args) {
 
 async function availableModels(command, directory) {
   if (!catalogCache || catalogCache.directory !== directory || Date.now() >= catalogCache.expiresAt) {
-    const [file, args] = commandSpec(command, ["models", "opencode", "--verbose", "--pure"]);
-    const promise = execFileAsync(file, args, { cwd: directory, windowsHide: true, timeout: 30_000, maxBuffer: 4 * 1024 * 1024 })
-      .then(({ stdout }) => stdout);
+    const commandLine = commandSpec(command, ["serve", "--stdio", "--hostname", "127.0.0.1", "--port", "0"]);
+    const promise = readRuntimeApi(commandLine, directory, { ...process.env, OPENCODE_DISABLE_PROJECT_CONFIG: "1" }, "/api/model");
     catalogCache = { directory, expiresAt: Date.now() + 60_000, promise };
     promise.catch(() => { if (catalogCache?.promise === promise) catalogCache = null; });
   }
   return catalogCache.promise;
 }
 
-async function resolvedPermissions(command, directory) {
-  const [file, args] = commandSpec(command, ["debug", "config", "--pure"]);
-  const { stdout } = await execFileAsync(file, args, { cwd: directory, windowsHide: true, timeout: 30_000, maxBuffer: 4 * 1024 * 1024 });
-  return JSON.parse(stdout).permission;
+async function resolvedConfiguration(command, directory) {
+  const [file, args] = commandSpec(command, ["api", "--standalone", "GET", "/api/config"]);
+  const { stdout } = await execFileAsync(file, args, { cwd: directory, env: { ...process.env, OPENCODE_DISABLE_PROJECT_CONFIG: "1" }, windowsHide: true, timeout: 30_000, maxBuffer: 4 * 1024 * 1024 });
+  const entries = JSON.parse(stdout);
+  if (!Array.isArray(entries)) throw new Error("Некорректная конфигурация OpenCode v2");
+  return entries;
 }
 
 async function inspectRunLog(run, attempt) {
-  if (!attempt || attempt.logBusy || attempt.failure || run.status !== "running") return;
+  if (!logFile || !attempt || attempt.logBusy || attempt.failure || run.status !== "running") return;
   attempt.logBusy = true;
   let handle;
   try {
@@ -84,10 +89,11 @@ async function resolveOpenCodeCommand() {
     shim = stdout.split(/\r?\n/).find(Boolean)?.trim();
   }
   if (!shim) throw new Error(`OpenCode command not found: ${opencodeCommand}`);
-  const executable = path.join(path.dirname(shim), "node_modules", "opencode-ai", "bin", "opencode.exe");
-  try { await access(executable); }
-  catch { throw new Error(`OpenCode executable not found next to shim: ${executable}`); }
-  return executable;
+  const candidates = windowsExecutableCandidates(shim, await readFile(shim, "utf8"));
+  for (const executable of candidates) {
+    try { await access(executable); return executable; } catch { /* Try the next installed package. */ }
+  }
+  throw new Error(`OpenCode executable not found next to shim: ${shim}`);
 }
 
 function reply(id, value) {
@@ -183,11 +189,11 @@ async function spawnRun(args) {
   const policy = await readPolicy();
   const directory = path.resolve(args.directory || process.cwd());
   const models = executionModels(await availableModels(command, directory), policy);
-  const permissions = await resolvedPermissions(command, directory);
-  modelEnvironment(process.env, models[0], permissions);
+  const configuration = await resolvedConfiguration(command, directory);
+  modelEnvironment(process.env, models[0], configuration);
   const workspace = await prepareWorkspace(args.directory || process.cwd(), id);
   const run = {
-    id, command, models, policy, permissions, nextModel: 0, model: models[0], prompt: args.prompt.trim(), sessionID: null, sideEffects: false,
+    id, command, models, policy, configuration, nextModel: 0, model: models[0], prompt: args.prompt.trim(), sessionID: null, sideEffects: false,
     attempt: null, attempts: [], workspace, status: "running", startedAt: new Date().toISOString(), finishedAt: null,
     timeoutSeconds, stdout: "", stderr: "", exitCode: null, signal: null, detail: null, waiters: [], timer: null,
     logTimer: null, timedOut: false,
@@ -230,8 +236,8 @@ async function startAttempt(run) {
   if (!model) return finish(run, "failed", `Разрешённые модели исчерпаны: ${run.detail ?? "fallback отключён"}`);
   const attempt = {
     model, startedAt: new Date().toISOString(), finishedAt: null,
-    failure: null, exitCode: null, signal: null, usefulOutput: false, streamStarted: false, outputTail: "", stderr: "",
-    lastActivityAt: Date.now(), logOffset: await stat(logFile).then((info) => info.size).catch(() => 0),
+    failure: null, exitCode: null, signal: null, usefulOutput: false, streamStarted: false, outputTail: "", stderr: "", stderrTail: "",
+    lastActivityAt: Date.now(), logOffset: logFile ? await stat(logFile).then((info) => info.size).catch(() => 0) : 0,
     logTail: "", logBusy: false, idleTimer: null, killTimer: null,
     title: `OpenCode subagent ${run.id.slice(0, 8)} attempt ${run.attempts.length + 1}`,
   };
@@ -241,13 +247,13 @@ async function startAttempt(run) {
   run.attempts.push(attempt);
   run.model = attempt.model;
   run.detail = null;
-  const commandArgs = ["run", "--pure", "--format", "json", "--model", attempt.model, "--dir", run.workspace.directory,
-    "--auto", "--title", attempt.title];
+  const commandArgs = ["run", "--standalone", "--format", "json", "--model", attempt.model,
+    "--agent", "build", "--auto", "--print-logs", "--log-level", "error", "--title", attempt.title];
   if (run.sessionID) commandArgs.push("--session", run.sessionID);
   commandArgs.push(run.sessionID ? "Продолжи исходное поручение в этой сессии после отказа предыдущей модели. Сначала проверь уже выполненные действия и файлы; не повторяй завершённые внешние операции." : run.prompt);
   const [command, argv] = commandSpec(run.command, commandArgs);
   const child = spawn(command, argv, {
-    cwd: run.workspace.directory, env: modelEnvironment(process.env, attempt.model, run.permissions), windowsHide: true,
+    cwd: run.workspace.directory, env: modelEnvironment(process.env, attempt.model, run.configuration), windowsHide: true,
     detached: process.platform !== "win32", stdio: ["ignore", "pipe", "pipe"],
   });
   attempt.child = child;
@@ -264,7 +270,9 @@ async function startAttempt(run) {
     const text = chunk.toString("utf8");
     run.stderr += text;
     attempt.stderr += text;
-    const failure = providerFailure(text);
+    const lines = (attempt.stderrTail + text).split(/\r?\n/);
+    attempt.stderrTail = lines.pop();
+    const failure = inspectErrorLogLines(lines);
     if (failure) failProvider(run, failure).catch(() => {});
   });
   child.on("error", (error) => finish(run, "failed", error.message));
@@ -285,7 +293,10 @@ async function closeAttempt(run, attempt, code, signal) {
   run.signal = signal;
   if (run.status === "cancelling") return finish(run, run.timedOut ? "failed" : "cancelled");
   if (run.status !== "running") return;
-  const failure = attempt.failure || providerFailure(attempt.stderr) || (code === 0 && !attempt.usefulOutput ? "Empty provider response" : null);
+  const stderrLines = attempt.stderr.split(/\r?\n/);
+  const failure = attempt.failure || inspectErrorLogLines(stderrLines)
+    || (code !== 0 ? providerFailure(stderrLines.filter((line) => !/\blevel=\w+\b/.test(line)).join("\n")) : null)
+    || (code === 0 && !attempt.usefulOutput ? "Empty provider response" : null);
   attempt.failure = failure;
   if (!failure) return finish(run, code === 0 ? "completed" : "failed", code === 0 ? null : `OpenCode exit ${code}`);
   if (run.sideEffects && !run.sessionID) return finish(run, "failed", `${failure}; продолжение без sessionID запрещено после работы инструментов`);
@@ -353,7 +364,7 @@ const tools = [
 
 async function handle(message) {
   const { id, method, params } = message;
-  if (method === "initialize") return reply(id, { result: { protocolVersion: params?.protocolVersion || "2025-03-26", capabilities: { tools: {} }, serverInfo: { name: "opencode-subagents", version: "1.1.0" } } });
+  if (method === "initialize") return reply(id, { result: { protocolVersion: params?.protocolVersion || "2025-03-26", capabilities: { tools: {} }, serverInfo: { name: "opencode-subagents", version: "2.0.1" } } });
   if (method === "notifications/initialized") return;
   if (method === "ping") return reply(id, { result: {} });
   if (method === "tools/list") return reply(id, { result: { tools } });
