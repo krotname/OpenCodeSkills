@@ -25,6 +25,7 @@ Run independent OpenCode tasks in separate Git worktrees and collect verifiable 
 | [PowerShell invocation](powershell-invocation/SKILL.md) | Preserve arguments and Unicode across PowerShell, SSH and WinRM |
 | [GitHub CI debugging](gh-fix-ci/SKILL.md) | Read failed GitHub Actions checks and find the relevant failure |
 | [OpenCode MCP server](mcp/opencode-subagents/README.md) | `spawn`, `wait`, `result`, `cancel`; isolated Git branches |
+| [Safe permission prompts](auto-approve-safety-prompts/README.md) | Automatically approve a small set of read-only shell requests in OpenCode v2 |
 
 ## Quick start
 
