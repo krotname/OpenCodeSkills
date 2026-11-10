@@ -7,6 +7,8 @@ import readline from "node:readline";
 import { fileURLToPath } from "node:url";
 import { inspectLogLines, inspectOutputLines, providerFailure } from "./provider-failure.mjs";
 import "./test-model-policy.mjs";
+import "./test-command-resolution.mjs";
+import "./test-runtime-api.mjs";
 
 assert.equal(providerFailure("AI_APICallError: Go usage limit exceeded"), "Go usage limit exceeded");
 assert.equal(providerFailure("connection timeout"), "Provider connection error");
@@ -42,6 +44,7 @@ function call(method, params = {}) {
 
 const initialized = await call("initialize", { protocolVersion: "2025-03-26" });
 assert.equal(initialized.result.serverInfo.name, "opencode-subagents");
+assert.equal(initialized.result.serverInfo.version, "2.0.1");
 const listed = await call("tools/list");
 assert.deepEqual(listed.result.tools.map((tool) => tool.name), ["spawn", "wait", "result", "cancel"]);
 const spawnSchema = listed.result.tools.find((tool) => tool.name === "spawn").inputSchema;

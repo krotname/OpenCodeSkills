@@ -5,7 +5,6 @@ export const MODEL_ORDER = Object.freeze([
   "opencode/space-bunny-free",
   "opencode/step-5-preview-free",
   "opencode/exo-free",
-  "opencode/cat-jam-free",
   "opencode/mimo-v2.6-flash-free",
   "opencode/longcat-2.5-preview-free",
   "opencode/ling-3.1-flash-free",
@@ -13,16 +12,15 @@ export const MODEL_ORDER = Object.freeze([
 ]);
 
 export function freeModels(catalog) {
+  const snapshot = typeof catalog === "string" ? JSON.parse(catalog) : catalog;
+  if (!Array.isArray(snapshot?.data)) throw new Error("Некорректный каталог OpenCode v2");
   const found = new Map();
-  const blocks = catalog.replace(/\u001b\[[0-9;]*m/g, "").split(/^(opencode\/[\w.-]+)\s*$/m);
-  for (let index = 1; index < blocks.length; index += 2) {
-    let model;
-    try { model = JSON.parse(blocks[index + 1].trim()); } catch { continue; }
-    const cost = model.cost;
-    if (model.providerID !== "opencode" || model.capabilities?.toolcall !== true || model.status === "deprecated") continue;
-    if (cost?.input !== 0 || cost?.output !== 0 || (cost.cache?.read ?? 0) !== 0 || (cost.cache?.write ?? 0) !== 0) continue;
-    if (blocks[index] !== `opencode/${model.id}`) continue;
-    found.set(blocks[index], model);
+  for (const model of snapshot.data) {
+    if (model.providerID !== "opencode" || model.enabled !== true || model.capabilities?.tools !== true || model.status === "deprecated") continue;
+    // Empty/unknown prices and any paid context tier are never evidence of free use.
+    if (!Array.isArray(model.cost) || !model.cost.length || !model.cost.every((cost) =>
+      cost?.input === 0 && cost?.output === 0 && (cost.cache?.read ?? 0) === 0 && (cost.cache?.write ?? 0) === 0)) continue;
+    found.set(`opencode/${model.id}`, model);
   }
   const models = MODEL_ORDER.filter((id) => found.has(id));
   if (!models.length) throw new Error("Нет доступных бесплатных OpenCode-моделей с поддержкой инструментов");
@@ -44,30 +42,43 @@ export function executionModels(catalog, policy, now = Date.now()) {
   return models;
 }
 
-export function modelEnvironment(environment, model, permissions) {
+export function modelEnvironment(environment, model, entries = []) {
   const overrides = JSON.parse(environment.OPENCODE_CONFIG_CONTENT || "{}");
-  const permission = permissions ?? overrides.permission;
-  const agent = { ...overrides.agent };
-  for (const name of new Set(["build", "plan", "general", "explore", "scout", "compaction", "title", "summary", ...Object.keys(agent)])) {
-    agent[name] = { ...agent[name], model };
+  const documents = entries.filter((entry) => entry.type === "document").map((entry) => entry.info);
+  const selection = { providerID: model.split("/")[0], model: model.slice(model.indexOf("/") + 1) };
+  // Authored global policies outrank inline policies in v2. Fail closed if
+  // one could reopen another provider instead of silently weakening isolation.
+  if (documents.some((info) => (info.policies ?? []).some((rule) =>
+    rule.action === "provider.use" && rule.effect === "allow" && rule.resource !== selection.providerID))) {
+    throw new Error("Глобальная политика OpenCode разрешает другого провайдера; изоляция Muse невозможна");
   }
-  const provider = { ...overrides.provider };
+  const denyNested = ["task", "subagent"].map((action) => ({ action, resource: "*", effect: "deny" }));
+  const configuredAgents = Object.assign({}, ...documents.map((info) => info.agents), overrides.agents);
+  const agents = {};
+  for (const name of new Set(["build", "plan", "general", "explore", "scout", "compaction", "title", "summary", ...Object.keys(configuredAgents)])) {
+    const agent = configuredAgents[name] ?? {};
+    agents[name] = { ...agent, model: selection, permissions: [...(agent.permissions ?? []), ...denyNested] };
+  }
+  const providers = { ...overrides.providers };
   if (model === GPT_FALLBACK) {
-    provider.openai = {
-      ...provider.openai,
-      models: { ...provider.openai?.models, "gpt-6.1-sol": { name: "GPT-6.1 Sol" } },
+    providers.openai = {
+      ...providers.openai,
+      models: { ...providers.openai?.models, "gpt-6.1-sol": { name: "GPT-6.1 Sol" } },
     };
   }
   return {
     ...environment,
     NO_COLOR: "1",
+    OPENCODE_DISABLE_PROJECT_CONFIG: "1",
     OPENCODE_CONFIG_CONTENT: JSON.stringify({
-      ...overrides, model, small_model: model,
-      enabled_providers: [model.split("/")[0]],
-      disabled_providers: [],
-      provider,
-      agent,
-      permission: { ...(typeof permission === "string" ? { "*": permission } : permission), task: "deny" },
+      ...overrides, model: selection, default_agent: "build", providers, agents,
+      permissions: [...documents.flatMap((info) => info.permissions ?? []), ...(overrides.permissions ?? []), ...denyNested],
+      policies: [
+        ...(overrides.policies ?? []),
+        { action: "provider.use", resource: "*", effect: "deny" },
+        { action: "provider.use", resource: selection.providerID, effect: "allow" },
+      ],
+      experimental: { ...overrides.experimental, subagent_depth: 0 },
     }),
   };
 }

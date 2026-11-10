@@ -17,23 +17,36 @@ await writeFile(fake, `
 import assert from 'node:assert/strict';
 import { access, writeFile, readFile } from 'node:fs/promises';
 import path from 'node:path';
-if (process.argv[2] === 'models') {
+import { createServer } from 'node:http';
+if (process.argv[2] === 'serve') {
+  const server = createServer((req, res) => { res.setHeader('content-type','application/json'); res.end(${JSON.stringify(catalogFor(["opencode/muse-spark-1.3-contributor-free", "opencode/step-5-preview-free"]))}); });
+  server.listen(0,'127.0.0.1',()=>console.log(JSON.stringify({url:'http://127.0.0.1:'+server.address().port})));
+  const stdinGuardTimer = setTimeout(()=>process.exit(2),15000); stdinGuardTimer.unref();
+  process.stdin.resume(); process.stdin.on('end',()=>server.close(()=>process.exit(0)));
+  await new Promise(()=>{});
+}
+if (process.argv[2] === 'api' && process.argv.at(-1) === '/api/model') {
   console.log(${JSON.stringify(catalogFor(["opencode/muse-spark-1.3-contributor-free", "opencode/step-5-preview-free"]))});
   process.exit(0);
 }
-if (process.argv[2] === 'debug') {
-  console.log(JSON.stringify({permission:{'*':'ask',edit:'deny'}}));
+if (process.argv[2] === 'api' && process.argv.at(-1) === '/api/config') {
+  console.log(JSON.stringify([{type:'document',info:{permissions:[{action:'edit',resource:'*',effect:'deny'}]}}]));
   process.exit(0);
 }
 const model = process.argv[process.argv.indexOf('--model') + 1];
 const resumed = process.argv.includes('--session');
 const prompt = resumed ? await readFile('fixture-session.txt', 'utf8') : process.argv.at(-1);
 const config = JSON.parse(process.env.OPENCODE_CONFIG_CONTENT);
-assert.equal(config.model, model);
-assert.equal(config.small_model, model);
-assert.equal(config.agent.explore.model, model);
-assert.deepEqual(config.enabled_providers, [model.split('/')[0]]);
-assert.deepEqual(config.permission, {'*':'ask',edit:'deny',task:'deny'});
+const selected = {providerID:model.split('/')[0],model:model.split('/')[1]};
+assert.deepEqual(config.model, selected);
+assert.deepEqual(config.agents.explore.model, selected);
+assert.equal(config.policies.at(-1).resource, selected.providerID);
+assert.deepEqual(config.permissions, [{action:'edit',resource:'*',effect:'deny'}, {action:'task',resource:'*',effect:'deny'}, {action:'subagent',resource:'*',effect:'deny'}]);
+assert.equal(config.experimental.subagent_depth, 0);
+assert.equal(process.argv.includes('--standalone'), true);
+assert.equal(process.argv.includes('--pure'), false);
+assert.equal(process.argv.includes('--dir'), false);
+assert.equal(process.env.OPENCODE_DISABLE_PROJECT_CONFIG, '1');
 assert.equal(process.argv.includes('--variant'), false);
 const first = model.endsWith('muse-spark-1.3-contributor-free');
 const emit = (type, part, session = true) => console.log(JSON.stringify({ type, part, ...(session ? {sessionID:'ses_fixture'} : {}) }));
@@ -62,6 +75,7 @@ if (prompt.startsWith('gpt-') && (first || (prompt === 'gpt-failure' && model.st
   emit('step_start', {});
   setTimeout(async () => { await writeFile('artifact.txt', 'long-tool'); emit('tool_use', {state:{status:'completed'}}); process.exit(0); }, 7000);
 } else {
+  process.stderr.write('level=INFO message="request" timeout=30000 quota=0\\nlevel=WARN message="failed to sync GitHub Copilot models" cause="TimeoutError: The operation timed out."\\n');
   emit('step_start', {});
   if (prompt === 'alpha' || prompt === 'beta') {
     const peer = path.join(process.env.OPENCODE_SUBAGENTS_FIXTURE_DIR, (prompt === 'alpha' ? 'beta' : 'alpha') + '.ready');
