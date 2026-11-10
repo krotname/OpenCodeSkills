@@ -15,6 +15,8 @@ for (const test of ["test.mjs", "test-provider-failure.mjs", "test-lifecycle.mjs
   const result = await exec(process.execPath, [path.join(root, "mcp", "opencode-subagents", test)], { cwd: root, timeout: 90000, maxBuffer: 2_000_000, windowsHide: true });
   process.stdout.write(result.stdout);
 }
+const pluginTests = await exec(process.execPath, ["--test", path.join(root, "auto-approve-safety-prompts", "plugin.test.mjs")], { cwd: root, timeout: 30000, maxBuffer: 2_000_000, windowsHide: true });
+process.stdout.write(pluginTests.stdout + pluginTests.stderr);
 const python = process.env.PYTHON || (process.platform === "win32" ? "python" : "python3");
 const result = await exec(python, ["-m", "unittest", "discover", "-s", "gh-fix-ci/tests"], { cwd: root, timeout: 30000, windowsHide: true });
 process.stdout.write(result.stdout + result.stderr);

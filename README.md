@@ -25,6 +25,7 @@
 | [Вызовы PowerShell](powershell-invocation/SKILL.md) | Аргументы и Unicode при работе через PowerShell, SSH и WinRM |
 | [Разбор GitHub CI](gh-fix-ci/SKILL.md) | Поиск причины упавшей проверки GitHub Actions |
 | [MCP-сервер OpenCode](mcp/opencode-subagents/README.md) | `spawn`, `wait`, `result`, `cancel`; отдельные Git-ветки |
+| [Auto-approve safety prompts](auto-approve-safety-prompts/README.md) | Автоматическое подтверждение ограниченного списка безопасных команд OpenCode |
 
 ## Быстрый старт
 
