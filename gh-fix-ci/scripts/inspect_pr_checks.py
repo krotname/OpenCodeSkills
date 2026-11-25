@@ -372,19 +372,17 @@ def fetch_check_log(
     job_id: str | None,
     repo_root: Path,
 ) -> tuple[str, str, str]:
+    # A run can contain failures from several parallel jobs or a later attempt.
+    # Keep a check's explicit job identity authoritative, including missing logs.
+    if job_id:
+        job_log, job_error = fetch_job_log(job_id, repo_root)
+        if not job_error:
+            return job_log, "", "ok"
+        return "", job_error, "pending" if is_log_pending_message(job_error) else "error"
+
     log_text, log_error = fetch_run_log(run_id, repo_root)
     if not log_error:
         return log_text, "", "ok"
-
-    if is_log_pending_message(log_error) and job_id:
-        job_log, job_error = fetch_job_log(job_id, repo_root)
-        if job_log:
-            return job_log, "", "ok"
-        if job_error and is_log_pending_message(job_error):
-            return "", job_error, "pending"
-        if job_error:
-            return "", job_error, "error"
-        return "", log_error, "pending"
 
     if is_log_pending_message(log_error):
         return "", log_error, "pending"

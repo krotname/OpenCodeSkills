@@ -52,6 +52,31 @@ class GhWrapperTests(unittest.TestCase):
         self.assertEqual(result.stdout, "ошибка сборки")
 
 
+class CheckLogTests(unittest.TestCase):
+    def test_exact_job_is_not_replaced_by_another_jobs_failure(self) -> None:
+        with patch.object(module, "fetch_job_log", return_value=("target job: Error: test failed", "")) as job, \
+             patch.object(module, "fetch_run_log", return_value=("other job: Error: upload failed", "")) as run:
+            result = module.fetch_check_log("100", "200", Path.cwd())
+        self.assertEqual(result, ("target job: Error: test failed", "", "ok"))
+        job.assert_called_once_with("200", Path.cwd())
+        run.assert_not_called()
+
+    def test_unavailable_exact_job_does_not_silently_use_run_logs(self) -> None:
+        for error, status in [("HTTP 404: job logs unavailable", "error"),
+                              ("run is still in progress", "pending")]:
+            with self.subTest(error=error), \
+                 patch.object(module, "fetch_job_log", return_value=("", error)), \
+                 patch.object(module, "fetch_run_log", return_value=("unrelated run log", "")) as run:
+                self.assertEqual(module.fetch_check_log("100", "200", Path.cwd()), ("", error, status))
+                run.assert_not_called()
+
+    def test_run_log_is_used_when_check_has_no_job_identity(self) -> None:
+        with patch.object(module, "fetch_job_log") as job, \
+             patch.object(module, "fetch_run_log", return_value=("run failure", "")):
+            self.assertEqual(module.fetch_check_log("100", None, Path.cwd()), ("run failure", "", "ok"))
+            job.assert_not_called()
+
+
 class SnippetTests(unittest.TestCase):
     def test_snippet_keeps_failure_line_when_context_exceeds_max_lines(self) -> None:
         lines = [f"step {i}" for i in range(100)]
